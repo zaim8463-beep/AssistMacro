@@ -1,10 +1,11 @@
-    
+
 name: Build Assist Macro APK
 
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   build:
@@ -16,16 +17,18 @@ jobs:
 
       - name: Find and extract project ZIP
         run: |
-          ZIP_FILE=$(find . -maxdepth 2 -iname "AssistMacro-Android-Source.zip" -print -quit)
+          ZIP_FILE=$(find . -maxdepth 3 -iname "AssistMacro-Android-Source.zip" -print -quit)
+
           if [ -z "$ZIP_FILE" ]; then
             echo "Project ZIP not found"
             exit 1
           fi
-          mkdir project
+
+          mkdir -p project
           unzip -o "$ZIP_FILE" -d project
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -35,50 +38,59 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Build APK
-        run: gradle -p project --no-daemon assembleDebug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: AssistMacro-APK
-          path: project/app/build/outputs/apk/debug/*.apk
-          
-          - name: Fix Java and Kotlin JVM target
+      - name: Fix Java and Kotlin JVM target
         run: |
-          FILE=$(find project -name build.gradle.kts -path "*/app/*" | head -n 1)
+          FILE=$(find project -path "*/app/build.gradle.kts" -print -quit)
+
           if [ -z "$FILE" ]; then
             echo "app/build.gradle.kts not found"
             exit 1
           fi
+
           python3 - "$FILE" <<'PY'
           import sys
+          import re
+
           p = sys.argv[1]
           s = open(p).read()
-          s = s.replace(
-              "sourceCompatibility = JavaVersion.VERSION_1_8",
-              "sourceCompatibility = JavaVersion.VERSION_17"
-          )
-          s = s.replace(
-              "targetCompatibility = JavaVersion.VERSION_1_8",
-              "targetCompatibility = JavaVersion.VERSION_17"
-          )
-          if "compileOptions {" not in s:
-              s = s.replace(
-                  "android {",
-                  "android {\n    compileOptions {\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n    }",
-                  1
+
+          if "compileOptions {" in s:
+              s = re.sub(
+                  r"sourceCompatibility\s*=\s*JavaVersion\.VERSION_1_8",
+                  "sourceCompatibility = JavaVersion.VERSION_17", s
+              )
+              s = re.sub(
+                  r"targetCompatibility\s*=\s*JavaVersion\.VERSION_1_8",
+                  "targetCompatibility = JavaVersion.VERSION_17", s
               )
           else:
               s = s.replace(
-                  "sourceCompatibility = JavaVersion.VERSION_1_8",
-                  "sourceCompatibility = JavaVersion.VERSION_17"
+                  "android {",
+                  """android {
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+          """, 1
               )
+
+          if "kotlinOptions {" in s:
+              s = re.sub(
+                  r'jvmTarget\s*=\s*"[^"]+"',
+                  'jvmTarget = "17"', s
+              )
+          else:
               s = s.replace(
-                  "targetCompatibility = JavaVersion.VERSION_1_8",
-                  "targetCompatibility = JavaVersion.VERSION_17"
+                  "android {",
+                  """android {
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          """, 1
               )
+
           open(p, "w").write(s)
+          print("Java and Kotlin targets set to 17")
           PY
 
       - name: Build APK
@@ -89,4 +101,5 @@ jobs:
         with:
           name: AssistMacro-APK
           path: project/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
           
