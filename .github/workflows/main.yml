@@ -1,38 +1,39 @@
-name: Build Assist Macro APK
-
-on:
-  workflow_dispatch:
-  push:
-    branches: [main]
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Find and extract project ZIP
+      - name: Fix Java and Kotlin JVM target
         run: |
-          ZIP_FILE=$(find . -maxdepth 2 -iname "AssistMacro-Android-Source.zip" -print -quit)
-          if [ -z "$ZIP_FILE" ]; then
-            echo "Project ZIP not found"
+          FILE=$(find project -name build.gradle.kts -path "*/app/*" | head -n 1)
+          if [ -z "$FILE" ]; then
+            echo "app/build.gradle.kts not found"
             exit 1
           fi
-          mkdir project
-          unzip -o "$ZIP_FILE" -d project
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.9"
+          python3 - "$FILE" <<'PY'
+          import sys
+          p = sys.argv[1]
+          s = open(p).read()
+          s = s.replace(
+              "sourceCompatibility = JavaVersion.VERSION_1_8",
+              "sourceCompatibility = JavaVersion.VERSION_17"
+          )
+          s = s.replace(
+              "targetCompatibility = JavaVersion.VERSION_1_8",
+              "targetCompatibility = JavaVersion.VERSION_17"
+          )
+          if "compileOptions {" not in s:
+              s = s.replace(
+                  "android {",
+                  "android {\n    compileOptions {\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n    }",
+                  1
+              )
+          else:
+              s = s.replace(
+                  "sourceCompatibility = JavaVersion.VERSION_1_8",
+                  "sourceCompatibility = JavaVersion.VERSION_17"
+              )
+              s = s.replace(
+                  "targetCompatibility = JavaVersion.VERSION_1_8",
+                  "targetCompatibility = JavaVersion.VERSION_17"
+              )
+          open(p, "w").write(s)
+          PY
 
       - name: Build APK
         run: gradle -p project --no-daemon assembleDebug
